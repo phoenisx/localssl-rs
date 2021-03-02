@@ -22,9 +22,9 @@ fn type_of<T>(_: &T) -> &str {
     type_name::<T>()
 }
 
-fn generate_rsa_key() -> String {
+fn generate_rsa_key(passphrase: Option<String>) -> String {
     let rsa = Rsa::generate(2048).unwrap();
-    let passphrase = "bar";
+    let passphrase = passphrase.unwrap_or("shevy".to_string());
     let buffer = rsa
         .private_key_to_pem_passphrase(Cipher::des_ede3_cbc(), passphrase.as_bytes())
         .unwrap();
@@ -37,6 +37,6 @@ fn generate_rsa_key() -> String {
 }
 
 fn main() {
-    let input = read!("Input a Number", usize);
-    println!("You Entered: {}", input);
+    let passphrase = read!("Enter a Passphrase", String);
+    println!("Generated: {}", generate_rsa_key(Some(passphrase)));
 }

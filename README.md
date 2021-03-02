@@ -1,4 +1,10 @@
-# Local SSL Certificate Generator Command Line Tool
+# Local SSL
+
+<div align="center">
+  <img src="note.svg" height="100" alt="Command Line Tool for Local SSL Certificate Generator">
+	<br />
+	<br />
+</div>
 
 This project is a helper command line tool, that
 generates an RSA (DES3 ciphered) private key and an sha256

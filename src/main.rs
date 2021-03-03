@@ -1,37 +1,83 @@
-use openssl::{rsa::Rsa, symm::Cipher};
-use std::{any::type_name, io::{self, Write}, fs};
+use openssl::{asn1, nid, hash, pkey, rsa::Rsa, symm::Cipher, x509};
+use std::{
+    any::type_name,
+    fs,
+    io::{self, Write},
+};
 
-macro_rules! read {
-    ($statement:literal, $return_type:ty) => {{
-        print!("{}: ", $statement);
-        io::stdout().flush().expect("flush failed!");
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .expect("Failed to read line");
-        input.trim().parse::<$return_type>().unwrap()
-    }};
+mod macros;
+
+struct SslData {
+    private_key: String,
+    cert: String,
 }
 
 fn type_of<T>(_: &T) -> &str {
     type_name::<T>()
 }
 
-fn generate_rsa_private_key(passphrase: Option<String>) -> String {
+fn generate_certificate(pem: &[u8], passphrase: &[u8]) -> io::Result<Vec<u8>> {
+    let private_key = pkey::PKey::private_key_from_pem_passphrase(pem, passphrase)?;
+    let mut subject_name = x509::X509NameBuilder::new().unwrap();
+    let expiry_days = asn1::Asn1Time::days_from_now(read!("Expiry Days", u32))?;
+    subject_name.append_entry_by_nid(nid::Nid::COUNTRYNAME, &read!("Country Name (2 letter code)", String))?;
+    subject_name.append_entry_by_nid(
+        nid::Nid::STATEORPROVINCENAME,
+        &read!("State or Province Name (full name)", String),
+    )?;
+    subject_name.append_entry_by_nid(
+        nid::Nid::LOCALITYNAME,
+        &read!("Locality Name (eg, city)", String),
+    )?;
+    subject_name.append_entry_by_nid(
+        nid::Nid::ORGANIZATIONNAME,
+        &read!("Organization Name (eg, company)", String),
+    )?;
+    subject_name.append_entry_by_nid(
+        nid::Nid::ORGANIZATIONALUNITNAME,
+        &read!("Organization Uni Name (eg, section)", String),
+    )?;
+    subject_name.append_entry_by_nid(
+        nid::Nid::COMMONNAME,
+        &read!("Common Name (eg, fully qualified host name)", String),
+    )?;
+    subject_name.append_entry_by_nid(
+        nid::Nid::PKCS9_EMAILADDRESS,
+        &read!("Email Address", String),
+    )?;
+    let mut cert = x509::X509Builder::new().unwrap();
+    cert.set_subject_name(&subject_name.build())?;
+    cert.set_not_after(&expiry_days)?;
+    cert.sign(&private_key, hash::MessageDigest::sha256())?;
+    let cert_bytes = cert.build().to_pem()?;
+    Ok(cert_bytes)
+}
+
+fn generate_rsa_private_key(passphrase: Option<String>) -> SslData {
     let rsa = Rsa::generate(2048).unwrap();
     let passphrase = passphrase.unwrap_or("shevy".to_string());
     let buffer = rsa
         .private_key_to_pem_passphrase(Cipher::des_ede3_cbc(), passphrase.as_bytes())
         .unwrap();
-    let m_str = match String::from_utf8(buffer) {
+    let cert = match generate_certificate(&buffer, passphrase.as_bytes()) {
+        Ok(cert_bytes) => String::from_utf8(cert_bytes).unwrap(),
+        Err(err) => {
+            // Not sure what to do here, should I trigger an
+            // error or should just return an empty string??
+            panic!("Failed to generate Cert: {}", err);
+        }
+    };
+    let private_key = match String::from_utf8(buffer.clone()) {
         Ok(v) => v,
         Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
     };
-    println!("{:?}", m_str);
-    m_str
+    SslData {
+        private_key,
+        cert
+    }
 }
 
-fn write_to_file(filename: String, data: String) -> io::Result<()> {
+fn write_to_file(filename: String, data: &str) -> io::Result<()> {
     let mut is_ok = true;
     let root_dir = "./out";
     if let Err(err) = fs::create_dir(root_dir) {
@@ -51,12 +97,17 @@ fn write_to_file(filename: String, data: String) -> io::Result<()> {
 fn main() {
     let filename = read!("Enter file basename", String);
     let passphrase = read!("Enter a Passphrase", String);
-    let private_key = generate_rsa_private_key(Some(passphrase));
-    match write_to_file(format!("{}{}", filename, ".key"), private_key) {
-        Ok(_) => {},
+    let ssl_data = generate_rsa_private_key(Some(passphrase));
+    match write_to_file(format!("{}{}", filename, ".key"), &ssl_data.private_key) {
+        Ok(_) => println!("Private Key: {}", ssl_data.private_key),
         Err(err) => {
-            println!("Writing to File Failed: {:?}", err);
+            println!("Writing Private Key Failed: {:?}", err);
         }
     }
-
+    match write_to_file(format!("{}{}", filename, ".cert.pem"), &ssl_data.cert) {
+        Ok(_) => println!("Certificate: {}", ssl_data.cert),
+        Err(err) => {
+            println!("Writing Certificate Failed: {:?}", err);
+        }
+    }
 }

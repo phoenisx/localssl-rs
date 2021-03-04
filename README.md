@@ -22,5 +22,9 @@ Help taken from - [freeCodeCamp](https://www.freecodecamp.org/news/how-to-get-ht
 
 ## References
 
+* A great read to understand OpenSSL implementations - [StackOverflow](https://stackoverflow.com/a/15082282/2849127)
+
+* [OS specific Keychain creations for Self Signed Certificates](https://support.kerioconnect.gfi.com/hc/en-us/articles/360015200119-Adding-Trusted-Root-Certificates-to-the-Server)
+
 * Learn About Macros:
   * List of useful *designators*: https://doc.rust-lang.org/rust-by-example/macros/designators.html

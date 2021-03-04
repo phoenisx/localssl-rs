@@ -1,4 +1,4 @@
-use openssl::{asn1, nid, hash, pkey, rsa::Rsa, symm::Cipher, x509};
+use openssl::{asn1, bn, hash, nid, pkey, rsa::Rsa, symm::Cipher, x509};
 use std::{
     any::type_name,
     fs,
@@ -12,6 +12,7 @@ struct SslData {
     cert: String,
 }
 
+#[allow(dead_code)]
 fn type_of<T>(_: &T) -> &str {
     type_name::<T>()
 }
@@ -20,7 +21,10 @@ fn generate_certificate(pem: &[u8], passphrase: &[u8]) -> io::Result<Vec<u8>> {
     let private_key = pkey::PKey::private_key_from_pem_passphrase(pem, passphrase)?;
     let mut subject_name = x509::X509NameBuilder::new().unwrap();
     let expiry_days = asn1::Asn1Time::days_from_now(read!("Expiry Days", u32))?;
-    subject_name.append_entry_by_nid(nid::Nid::COUNTRYNAME, &read!("Country Name (2 letter code)", String))?;
+    subject_name.append_entry_by_nid(
+        nid::Nid::COUNTRYNAME,
+        &read!("Country Name (2 letter code)", String),
+    )?;
     subject_name.append_entry_by_nid(
         nid::Nid::STATEORPROVINCENAME,
         &read!("State or Province Name (full name)", String),
@@ -45,9 +49,17 @@ fn generate_certificate(pem: &[u8], passphrase: &[u8]) -> io::Result<Vec<u8>> {
         nid::Nid::PKCS9_EMAILADDRESS,
         &read!("Email Address", String),
     )?;
+    let subject_name = subject_name.build();
     let mut cert = x509::X509Builder::new().unwrap();
-    cert.set_subject_name(&subject_name.build())?;
+    cert.set_version(2)?;
+    cert.set_serial_number(
+        &asn1::Asn1Integer::from_bn(&bn::BigNum::from_u32(1).unwrap()).unwrap(),
+    )?;
+    cert.set_not_before(&asn1::Asn1Time::days_from_now(0).unwrap())?;
     cert.set_not_after(&expiry_days)?;
+    cert.set_subject_name(&subject_name)?;
+    cert.set_issuer_name(&subject_name)?;
+    cert.set_pubkey(&private_key)?;
     cert.sign(&private_key, hash::MessageDigest::sha256())?;
     let cert_bytes = cert.build().to_pem()?;
     Ok(cert_bytes)
@@ -71,10 +83,7 @@ fn generate_rsa_private_key(passphrase: Option<String>) -> SslData {
         Ok(v) => v,
         Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
     };
-    SslData {
-        private_key,
-        cert
-    }
+    SslData { private_key, cert }
 }
 
 fn write_to_file(filename: String, data: &str) -> io::Result<()> {
@@ -110,4 +119,7 @@ fn main() {
             println!("Writing Certificate Failed: {:?}", err);
         }
     }
+
+    // let acl =
+    //     AccessControl::create_with_flags(AttrAccessible::WhenUnlocked, Default::default()).unwrap();
 }

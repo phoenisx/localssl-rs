@@ -3,6 +3,7 @@ use std::{
     any::type_name,
     fs,
     io::{self, Write},
+    process,
 };
 
 mod macros;
@@ -73,20 +74,16 @@ fn generate_rsa_private_key(passphrase: Option<String>) -> SslData {
         .unwrap();
     let cert = match generate_certificate(&buffer, passphrase.as_bytes()) {
         Ok(cert_bytes) => String::from_utf8(cert_bytes).unwrap(),
-        Err(err) => {
-            // Not sure what to do here, should I trigger an
-            // error or should just return an empty string??
-            panic!("Failed to generate Cert: {}", err);
-        }
+        Err(_) => String::default()
     };
     let private_key = match String::from_utf8(buffer.clone()) {
         Ok(v) => v,
-        Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+        Err(_) => String::default(),
     };
     SslData { private_key, cert }
 }
 
-fn write_to_file(filename: String, data: &str) -> io::Result<()> {
+fn write_to_file(filename: &String, data: &str) -> io::Result<()> {
     let mut is_ok = true;
     let root_dir = "./out";
     if let Err(err) = fs::create_dir(root_dir) {
@@ -103,23 +100,49 @@ fn write_to_file(filename: String, data: &str) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn add_certificate(filename: String) -> process::Output {
+    let command = "sudo security add-trusted-cert -d -k /Library/Keychains/System.keychain";
+    let command = format!("{} $(echo \"$(pwd)/out/{}\")", command, filename);
+    process::Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .output()
+            .expect("failed to execute process")
+}
+
+#[cfg(target_os = "linux")]
+fn add_certificate() {
+    std::todo!();
+}
+
+#[cfg(target_os = "windows")]
+fn add_certificate() {
+    std::todo!();
+}
+
 fn main() {
     let filename = read!("Enter file basename", String);
     let passphrase = read!("Enter a Passphrase", String);
     let ssl_data = generate_rsa_private_key(Some(passphrase));
-    match write_to_file(format!("{}{}", filename, ".key"), &ssl_data.private_key) {
+    match write_to_file(&format!("{}{}", filename, ".key"), &ssl_data.private_key) {
         Ok(_) => println!("Private Key: {}", ssl_data.private_key),
         Err(err) => {
             println!("Writing Private Key Failed: {:?}", err);
         }
     }
-    match write_to_file(format!("{}{}", filename, ".cert.pem"), &ssl_data.cert) {
-        Ok(_) => println!("Certificate: {}", ssl_data.cert),
-        Err(err) => {
-            println!("Writing Certificate Failed: {:?}", err);
+    let certificate_filename = {
+        let _filename = format!("{}{}", filename, ".cert.pem");
+        match write_to_file(&_filename, &ssl_data.cert) {
+            Ok(_) => _filename,
+            Err(err) => {
+                println!("Writing Certificate Failed: {:?}", err);
+                String::default()
+            }
         }
-    }
+    };
 
-    // let acl =
-    //     AccessControl::create_with_flags(AttrAccessible::WhenUnlocked, Default::default()).unwrap();
+    if !certificate_filename.is_empty() && add_certificate(certificate_filename).status.success() {
+        println!("Successfully Added Certificate to Keychain");
+    }
 }

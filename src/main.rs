@@ -4,9 +4,12 @@ use std::{
     fs,
     io::{self, Write},
     process,
+    path,
 };
 
 mod macros;
+
+const ROOT_DIR: &'static str = "./out";
 
 struct SslData {
     private_key: String,
@@ -16,6 +19,44 @@ struct SslData {
 #[allow(dead_code)]
 fn type_of<T>(_: &T) -> &str {
     type_name::<T>()
+}
+
+fn write_to_file(filename: &String, data: &str) -> io::Result<()> {
+    let mut file = fs::File::create(format!("{}/{}", ROOT_DIR, filename))?;
+    file.write_all(data.as_bytes())?;
+    file.sync_data()?;
+    Ok(())
+}
+
+fn setup() -> bool {
+    let mut is_ok = true;
+    if let Err(err) = fs::create_dir(ROOT_DIR) {
+        if !err.kind().eq(&io::ErrorKind::AlreadyExists) {
+            is_ok = false;
+            println!("Directory Create Failed: {:?}", err);
+        }
+    }
+    let server_cfg_filename = "server.csr.cfg";
+    let v3_filename = "v3.ext";
+    if is_ok {
+        let server_cfg = include_str!("server.csr.cfg");
+        let v3_ext = include_str!("v3.ext");
+        let path = format!("{}/{}", ROOT_DIR, server_cfg_filename);
+        let server_cfg_path = path::Path::new(&path);
+        let path = format!("{}/{}", ROOT_DIR, v3_filename);
+        let v3_path = path::Path::new(&path);
+        if !server_cfg_path.exists() {
+            if let Err(_) = write_to_file(&server_cfg_filename.to_string(), server_cfg) {
+                is_ok = false;
+            }
+        }
+        if !v3_path.exists() {
+            if let Err(_) = write_to_file(&v3_filename.to_string(), v3_ext) {
+                is_ok = false;
+            }
+        }
+    }
+    is_ok
 }
 
 fn generate_certificate(pem: &[u8], passphrase: &[u8]) -> io::Result<Vec<u8>> {
@@ -83,23 +124,6 @@ fn generate_rsa_private_key(passphrase: Option<String>) -> SslData {
     SslData { private_key, cert }
 }
 
-fn write_to_file(filename: &String, data: &str) -> io::Result<()> {
-    let mut is_ok = true;
-    let root_dir = "./out";
-    if let Err(err) = fs::create_dir(root_dir) {
-        if !err.kind().eq(&io::ErrorKind::AlreadyExists) {
-            is_ok = false;
-            println!("Directory Create Failed: {:?}", err);
-        }
-    }
-    if is_ok {
-        let mut file = fs::File::create(format!("{}/{}", root_dir, filename))?;
-        file.write_all(data.as_bytes())?;
-        file.sync_data()?;
-    }
-    Ok(())
-}
-
 #[cfg(target_os = "macos")]
 fn add_certificate(filename: String) -> process::Output {
     let command = "sudo security add-trusted-cert -d -k /Library/Keychains/System.keychain";
@@ -122,27 +146,29 @@ fn add_certificate() {
 }
 
 fn main() {
-    let filename = read!("Enter file basename", String);
-    let passphrase = read!("Enter a Passphrase", String);
-    let ssl_data = generate_rsa_private_key(Some(passphrase));
-    match write_to_file(&format!("{}{}", filename, ".key"), &ssl_data.private_key) {
-        Ok(_) => println!("Private Key: {}", ssl_data.private_key),
-        Err(err) => {
-            println!("Writing Private Key Failed: {:?}", err);
-        }
-    }
-    let certificate_filename = {
-        let _filename = format!("{}{}", filename, ".cert.pem");
-        match write_to_file(&_filename, &ssl_data.cert) {
-            Ok(_) => _filename,
+    if setup() {
+        let filename = read!("Enter file basename", String);
+        let passphrase = read!("Enter a Passphrase", String);
+        let ssl_data = generate_rsa_private_key(Some(passphrase));
+        match write_to_file(&format!("{}{}", filename, ".key"), &ssl_data.private_key) {
+            Ok(_) => println!("Private Key: {}", ssl_data.private_key),
             Err(err) => {
-                println!("Writing Certificate Failed: {:?}", err);
-                String::default()
+                println!("Writing Private Key Failed: {:?}", err);
             }
         }
-    };
+        let certificate_filename = {
+            let _filename = format!("{}{}", filename, ".cert.pem");
+            match write_to_file(&_filename, &ssl_data.cert) {
+                Ok(_) => _filename,
+                Err(err) => {
+                    println!("Writing Certificate Failed: {:?}", err);
+                    String::default()
+                }
+            }
+        };
 
-    if !certificate_filename.is_empty() && add_certificate(certificate_filename).status.success() {
-        println!("Successfully Added Certificate to Keychain");
+        if !certificate_filename.is_empty() && add_certificate(certificate_filename).status.success() {
+            println!("Successfully Added Certificate to Keychain");
+        }
     }
 }
